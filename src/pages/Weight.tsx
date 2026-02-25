@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Plus, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Loader2, Trash2, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 
@@ -16,14 +16,29 @@ export default function Weight() {
   const [history, setHistory] = useState<WeightLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [goalWeight, setGoalWeight] = useState<number | null>(null);
+  const [showGoalInput, setShowGoalInput] = useState(false);
+  const [newGoal, setNewGoal] = useState('');
 
-  // 获取体重记录
-  const fetchWeights = async () => {
+  // 获取体重记录和目标体重
+  const fetchData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      // 获取目标体重
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('target_weight')
+        .eq('id', user.id)
+        .single();
+      
+      if (profile) {
+        setGoalWeight(profile.target_weight);
+      }
+
+      // 获取体重记录
+      const { data: logs, error } = await supabase
         .from('weight_logs')
         .select('*')
         .eq('user_id', user.id)
@@ -31,22 +46,45 @@ export default function Weight() {
 
       if (error) throw error;
 
-      if (data) {
-        setHistory(data);
-        if (data.length > 0) {
-          setCurrentWeight(data[data.length - 1].weight);
+      if (logs) {
+        setHistory(logs);
+        if (logs.length > 0) {
+          setCurrentWeight(logs[logs.length - 1].weight);
         }
       }
     } catch (error) {
-      console.error('Error fetching weight logs:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchWeights();
+    fetchData();
   }, []);
+
+  // 更新目标体重
+  const handleUpdateGoal = async () => {
+    if (!newGoal) return;
+    const target = parseFloat(newGoal);
+    if (isNaN(target)) return;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ id: user.id, target_weight: target });
+
+      if (error) throw error;
+      setGoalWeight(target);
+      setShowGoalInput(false);
+    } catch (error) {
+      console.error('Error updating goal:', error);
+      alert('更新失败');
+    }
+  };
 
   // 添加体重记录
   const handleAddWeight = async () => {
@@ -68,7 +106,7 @@ export default function Weight() {
       if (error) throw error;
 
       setInputWeight('');
-      fetchWeights(); // 重新加载数据
+      fetchData(); // 重新加载数据
     } catch (error) {
       console.error('Error adding weight:', error);
       alert('添加失败，请重试');
@@ -87,17 +125,22 @@ export default function Weight() {
         .eq('id', id);
       
       if (error) throw error;
-      fetchWeights();
+      fetchData();
     } catch (error) {
       console.error('Error deleting weight:', error);
     }
   };
 
-  const startWeight = history.length > 0 ? history[0].weight : (currentWeight || 70);
-  const goalWeight = 65.0; // 这里暂时写死，后续可以做到个人资料里
-  const progress = currentWeight 
-    ? ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100 
-    : 0;
+  const startWeight = history.length > 0 ? history[0].weight : (currentWeight || 0);
+  const displayGoal = goalWeight || 0;
+  
+  // 计算进度
+  let progress = 0;
+  if (startWeight && displayGoal && currentWeight) {
+    const totalDiff = Math.abs(startWeight - displayGoal);
+    const currentDiff = Math.abs(currentWeight - displayGoal);
+    progress = totalDiff > 0 ? ((totalDiff - currentDiff) / totalDiff) * 100 : 0;
+  }
 
   // 格式化图表数据
   const chartData = history.map(log => ({
@@ -114,15 +157,42 @@ export default function Weight() {
       <h1 className="text-2xl font-bold text-gray-800">体重管理</h1>
 
       {/* 当前状态卡片 */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center relative">
+        <button 
+          onClick={() => setShowGoalInput(!showGoalInput)}
+          className="absolute top-4 right-4 text-gray-400 hover:text-primary transition-colors"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
+
         <p className="text-gray-500 text-sm mb-2">当前体重</p>
         <div className="text-4xl font-bold text-primary mb-2">
           {currentWeight || '--'} <span className="text-lg text-gray-400 font-normal">kg</span>
         </div>
-        <div className="flex justify-center items-center gap-4 text-xs text-gray-500">
-           <span>初始: {startWeight}kg</span>
-           <span>目标: {goalWeight}kg</span>
-        </div>
+        
+        {showGoalInput ? (
+          <div className="flex gap-2 justify-center items-center my-4 animate-in fade-in zoom-in duration-300">
+            <input 
+              type="number" 
+              placeholder="目标体重" 
+              className="w-24 p-1 border border-gray-300 rounded text-center text-sm"
+              value={newGoal}
+              onChange={(e) => setNewGoal(e.target.value)}
+            />
+            <button 
+              onClick={handleUpdateGoal}
+              className="text-xs bg-primary text-white px-2 py-1 rounded hover:bg-primary/90"
+            >
+              保存
+            </button>
+          </div>
+        ) : (
+          <div className="flex justify-center items-center gap-4 text-xs text-gray-500">
+             <span>初始: {startWeight || '--'}kg</span>
+             <span>目标: {displayGoal || '未设置'}kg</span>
+          </div>
+        )}
+
         <div className="mt-4 h-2 bg-gray-100 rounded-full overflow-hidden">
           <div 
             className="h-full bg-primary transition-all duration-500" 
@@ -130,7 +200,9 @@ export default function Weight() {
           />
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          {currentWeight ? `距离目标还差 ${(currentWeight - goalWeight).toFixed(1)} kg` : '开始记录你的第一条体重吧'}
+          {currentWeight && displayGoal 
+            ? `距离目标还差 ${Math.abs(currentWeight - displayGoal).toFixed(1)} kg` 
+            : '设置目标并开始记录吧'}
         </p>
       </div>
 

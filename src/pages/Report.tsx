@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { supabase } from '../lib/supabase';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 
 type WeeklyData = {
@@ -21,6 +21,7 @@ export default function Report() {
   const [macroData, setMacroData] = useState<MacroData[]>([]);
   const [averages, setAverages] = useState({ intake: 0, burn: 0 });
   const [loading, setLoading] = useState(true);
+  const [hasData, setHasData] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -46,6 +47,10 @@ export default function Report() {
           .eq('user_id', user.id)
           .gte('recorded_at', startOfDay(startDate).toISOString())
           .lte('recorded_at', endOfDay(endDate).toISOString());
+
+        const hasDiet = dietData && dietData.length > 0;
+        const hasFitness = fitnessData && fitnessData.length > 0;
+        setHasData(!!(hasDiet || hasFitness));
 
         // Process Weekly Data (Bar Chart)
         const days = [];
@@ -85,12 +90,7 @@ export default function Report() {
             { name: '脂肪', value: Math.round((totalFat / totalMacros) * 100), color: '#EAB308' },
           ]);
         } else {
-            // Default empty state
-             setMacroData([
-                { name: '蛋白质', value: 33, color: '#F59E0B' },
-                { name: '碳水', value: 33, color: '#3B82F6' },
-                { name: '脂肪', value: 34, color: '#EAB308' },
-              ]);
+             setMacroData([]);
         }
 
       } catch (error) {
@@ -104,6 +104,18 @@ export default function Report() {
   }, []);
 
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
+
+  if (!hasData) {
+    return (
+      <div className="p-6 max-w-md mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <div className="bg-gray-50 p-6 rounded-full mb-4">
+          <AlertCircle className="w-12 h-12 text-gray-300" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">暂无周报数据</h2>
+        <p className="text-gray-500 mb-6">开始记录您的饮食和运动，<br/>这里将为您生成详细的健康分析。</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-md mx-auto space-y-8 pb-24">
@@ -124,42 +136,44 @@ export default function Report() {
       </div>
 
       {/* 营养分布饼图 */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="font-semibold text-gray-700 mb-4">本周营养结构</h3>
-        <div className="h-48 relative">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={macroData}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={80}
-                paddingAngle={5}
-                dataKey="value"
-              >
-                {macroData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          {/* 中心文字 */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-             <span className="text-xs text-gray-400">均衡度</span>
-             <span className="text-xl font-bold text-gray-800">良</span>
+      {macroData.length > 0 && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <h3 className="font-semibold text-gray-700 mb-4">本周营养结构</h3>
+          <div className="h-48 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={macroData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {macroData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            {/* 中心文字 */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+               <span className="text-xs text-gray-400">均衡度</span>
+               <span className="text-xl font-bold text-gray-800">--</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-center gap-6 mt-4">
+            {macroData.map((item) => (
+              <div key={item.name} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="text-xs text-gray-600">{item.name} {item.value}%</span>
+              </div>
+            ))}
           </div>
         </div>
-        
-        <div className="flex justify-center gap-6 mt-4">
-          {macroData.map((item) => (
-            <div key={item.name} className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-              <span className="text-xs text-gray-600">{item.name} {item.value}%</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* 摄入 vs 消耗 柱状图 */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">

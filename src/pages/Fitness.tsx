@@ -89,10 +89,12 @@ export default function Fitness() {
     setIsTimerRunning(false);
     // 自动填入时长（分钟）
     const minutes = Math.ceil(timer / 60);
-    setNewExercise(prev => ({ ...prev, duration: minutes.toString() }));
-    // 简单估算热量 (假设跑步 10kcal/min)
-    if (newExercise.type === '跑步') {
-      setNewExercise(prev => ({ ...prev, calories: (minutes * 10).toString() }));
+    if (minutes > 0) {
+        setNewExercise(prev => ({ ...prev, duration: minutes.toString() }));
+        // 简单估算热量 (假设跑步 10kcal/min)
+        if (newExercise.type === '跑步') {
+            setNewExercise(prev => ({ ...prev, calories: (minutes * 10).toString() }));
+        }
     }
     setTimer(0);
   };
@@ -129,7 +131,8 @@ export default function Fitness() {
           </button>
           <button 
             onClick={handleStopTimer}
-            className="bg-white/20 hover:bg-white/30 p-3 rounded-full backdrop-blur-sm transition-colors"
+            disabled={timer === 0 && !isTimerRunning}
+            className="bg-white/20 hover:bg-white/30 p-3 rounded-full backdrop-blur-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Square className="w-6 h-6 fill-current" />
           </button>
