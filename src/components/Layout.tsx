@@ -1,9 +1,16 @@
-import { Link, useLocation } from 'react-router-dom';
-import { Home, Scale, Utensils, Dumbbell, PieChart } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Home, Scale, Utensils, Dumbbell, PieChart, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/auth');
+  };
 
   const navItems = [
     { path: '/', icon: Home, label: '首页' },
@@ -15,6 +22,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
+      <header className="fixed top-0 right-0 p-4 z-50">
+        <button 
+          onClick={handleSignOut}
+          className="p-2 bg-white/80 rounded-full shadow-sm text-gray-500 hover:text-red-500 transition-colors backdrop-blur-sm"
+          title="退出登录"
+        >
+          <LogOut className="w-5 h-5" />
+        </button>
+      </header>
       <main className="flex-1 pb-20 overflow-y-auto">
         {children}
       </main>

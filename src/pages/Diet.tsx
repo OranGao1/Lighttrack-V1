@@ -1,9 +1,53 @@
-import { useState } from 'react';
-import { Camera, Check, X, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Camera, Check, X, Loader2, Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { format } from 'date-fns';
+
+type DietLog = {
+  id: string;
+  description: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  meal_type: string;
+  recorded_at: string;
+};
 
 export default function Diet() {
   const [isScanning, setIsScanning] = useState(false);
   const [scannedResult, setScannedResult] = useState<null | { food: string; calories: number; protein: number; carbs: number; fat: number }>(null);
+  const [todayLogs, setTodayLogs] = useState<DietLog[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 获取今日饮食记录
+  const fetchDietLogs = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .from('diet_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('recorded_at', todayStart.toISOString())
+        .order('recorded_at', { ascending: false });
+
+      if (error) throw error;
+      if (data) setTodayLogs(data);
+    } catch (error) {
+      console.error('Error fetching diet logs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDietLogs();
+  }, []);
 
   const handleScan = () => {
     setIsScanning(true);
@@ -20,9 +64,52 @@ export default function Diet() {
     }, 2000);
   };
 
+  const handleConfirm = async () => {
+    if (!scannedResult) return;
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user logged in');
+
+      const { error } = await supabase.from('diet_logs').insert([
+        {
+          user_id: user.id,
+          description: scannedResult.food,
+          calories: scannedResult.calories,
+          protein: scannedResult.protein,
+          carbs: scannedResult.carbs,
+          fat: scannedResult.fat,
+          meal_type: 'lunch', // 简化处理，默认记录为午餐，实际可加选择
+          is_ai_generated: true
+        }
+      ]);
+
+      if (error) throw error;
+      
+      setScannedResult(null);
+      fetchDietLogs();
+    } catch (error) {
+      console.error('Error saving diet log:', error);
+      alert('保存失败，请重试');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定删除这条记录吗？')) return;
+    try {
+      const { error } = await supabase.from('diet_logs').delete().eq('id', id);
+      if (error) throw error;
+      fetchDietLogs();
+    } catch (error) {
+      console.error('Error deleting diet log:', error);
+    }
+  };
+
   const handleReset = () => {
     setScannedResult(null);
   };
+
+  if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
 
   return (
     <div className="p-6 max-w-md mx-auto space-y-6">
@@ -90,17 +177,46 @@ export default function Diet() {
             </div>
           </div>
 
-          <button className="w-full mt-6 bg-primary text-white py-3 rounded-xl font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2">
+          <button 
+            onClick={handleConfirm}
+            className="w-full mt-6 bg-primary text-white py-3 rounded-xl font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+          >
             <Check className="w-5 h-5" />
             确认记录
           </button>
         </div>
       )}
 
-      {/* 手动调整提示 */}
-      <div className="text-center text-xs text-gray-400">
-        识别结果不准确？<button className="text-primary underline">手动调整</button>
+      {/* 今日饮食记录列表 */}
+      <div className="space-y-4">
+        <h3 className="font-semibold text-gray-700">今日记录</h3>
+        {todayLogs.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-4">今天还没有记录饮食哦</p>
+        ) : (
+          <div className="space-y-3">
+            {todayLogs.map(log => (
+              <div key={log.id} className="bg-white p-4 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
+                <div>
+                  <div className="font-medium text-gray-800">{log.description}</div>
+                  <div className="text-xs text-gray-500">
+                    {log.calories} kcal • 蛋{log.protein}g 碳{log.carbs}g 脂{log.fat}g
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(log.id)} className="text-gray-300 hover:text-red-500">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* 手动调整提示 */}
+      {!scannedResult && (
+        <div className="text-center text-xs text-gray-400 pt-4">
+          识别结果不准确？<button className="text-primary underline">手动调整</button>
+        </div>
+      )}
     </div>
   );
 }

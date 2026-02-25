@@ -1,22 +1,110 @@
+import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
+import { supabase } from '../lib/supabase';
+import { Loader2 } from 'lucide-react';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 
-const data = [
-  { name: '蛋白质', value: 30, color: '#F59E0B' }, // Amber-500
-  { name: '碳水', value: 45, color: '#3B82F6' },    // Blue-500
-  { name: '脂肪', value: 25, color: '#EAB308' },    // Yellow-500
-];
+type WeeklyData = {
+  name: string;
+  intake: number;
+  burn: number;
+};
 
-const weeklyData = [
-  { name: 'M', intake: 2100, burn: 1800 },
-  { name: 'T', intake: 1950, burn: 2000 },
-  { name: 'W', intake: 2300, burn: 1900 },
-  { name: 'T', intake: 1800, burn: 2100 },
-  { name: 'F', intake: 2000, burn: 1950 },
-  { name: 'S', intake: 2400, burn: 2200 },
-  { name: 'S', intake: 2200, burn: 1600 },
-];
+type MacroData = {
+  name: string;
+  value: number;
+  color: string;
+};
 
 export default function Report() {
+  const [weeklyData, setWeeklyData] = useState<WeeklyData[]>([]);
+  const [macroData, setMacroData] = useState<MacroData[]>([]);
+  const [averages, setAverages] = useState({ intake: 0, burn: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const endDate = new Date();
+        const startDate = subDays(endDate, 6); // Last 7 days
+
+        // Fetch Diet Logs
+        const { data: dietData } = await supabase
+          .from('diet_logs')
+          .select('calories, protein, carbs, fat, recorded_at')
+          .eq('user_id', user.id)
+          .gte('recorded_at', startOfDay(startDate).toISOString())
+          .lte('recorded_at', endOfDay(endDate).toISOString());
+
+        // Fetch Fitness Logs
+        const { data: fitnessData } = await supabase
+          .from('fitness_logs')
+          .select('calories_burned, recorded_at')
+          .eq('user_id', user.id)
+          .gte('recorded_at', startOfDay(startDate).toISOString())
+          .lte('recorded_at', endOfDay(endDate).toISOString());
+
+        // Process Weekly Data (Bar Chart)
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = subDays(endDate, i);
+          const dayStr = format(d, 'yyyy-MM-dd');
+          const dayName = format(d, 'EEE'); // Mon, Tue...
+          
+          const dayDiet = dietData?.filter(l => format(new Date(l.recorded_at), 'yyyy-MM-dd') === dayStr);
+          const dayFitness = fitnessData?.filter(l => format(new Date(l.recorded_at), 'yyyy-MM-dd') === dayStr);
+          
+          const intake = dayDiet?.reduce((sum, item) => sum + (item.calories || 0), 0) || 0;
+          const burn = dayFitness?.reduce((sum, item) => sum + (item.calories_burned || 0), 0) || 0;
+
+          days.push({ name: dayName, intake, burn });
+        }
+        setWeeklyData(days);
+
+        // Process Averages
+        const totalIntake = days.reduce((sum, d) => sum + d.intake, 0);
+        const totalBurn = days.reduce((sum, d) => sum + d.burn, 0);
+        setAverages({
+          intake: Math.round(totalIntake / 7),
+          burn: Math.round(totalBurn / 7)
+        });
+
+        // Process Macro Data (Pie Chart)
+        const totalProtein = dietData?.reduce((sum, item) => sum + (item.protein || 0), 0) || 0;
+        const totalCarbs = dietData?.reduce((sum, item) => sum + (item.carbs || 0), 0) || 0;
+        const totalFat = dietData?.reduce((sum, item) => sum + (item.fat || 0), 0) || 0;
+        const totalMacros = totalProtein + totalCarbs + totalFat;
+
+        if (totalMacros > 0) {
+          setMacroData([
+            { name: '蛋白质', value: Math.round((totalProtein / totalMacros) * 100), color: '#F59E0B' },
+            { name: '碳水', value: Math.round((totalCarbs / totalMacros) * 100), color: '#3B82F6' },
+            { name: '脂肪', value: Math.round((totalFat / totalMacros) * 100), color: '#EAB308' },
+          ]);
+        } else {
+            // Default empty state
+             setMacroData([
+                { name: '蛋白质', value: 33, color: '#F59E0B' },
+                { name: '碳水', value: 33, color: '#3B82F6' },
+                { name: '脂肪', value: 34, color: '#EAB308' },
+              ]);
+        }
+
+      } catch (error) {
+        console.error('Error fetching report data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
+  if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
+
   return (
     <div className="p-6 max-w-md mx-auto space-y-8 pb-24">
       <h1 className="text-2xl font-bold text-gray-800">周报总结</h1>
@@ -25,12 +113,12 @@ export default function Report() {
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 text-center">
           <div className="text-xs text-gray-500 mb-1">平均摄入</div>
-          <div className="text-2xl font-bold text-gray-800">2,105</div>
+          <div className="text-2xl font-bold text-gray-800">{averages.intake}</div>
           <div className="text-xs text-gray-400">kcal/天</div>
         </div>
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 text-center">
           <div className="text-xs text-gray-500 mb-1">平均消耗</div>
-          <div className="text-2xl font-bold text-gray-800">1,935</div>
+          <div className="text-2xl font-bold text-gray-800">{averages.burn}</div>
           <div className="text-xs text-gray-400">kcal/天</div>
         </div>
       </div>
@@ -42,7 +130,7 @@ export default function Report() {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={data}
+                data={macroData}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
@@ -50,7 +138,7 @@ export default function Report() {
                 paddingAngle={5}
                 dataKey="value"
               >
-                {data.map((entry, index) => (
+                {macroData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
@@ -64,7 +152,7 @@ export default function Report() {
         </div>
         
         <div className="flex justify-center gap-6 mt-4">
-          {data.map((item) => (
+          {macroData.map((item) => (
             <div key={item.name} className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
               <span className="text-xs text-gray-600">{item.name} {item.value}%</span>
@@ -75,7 +163,7 @@ export default function Report() {
 
       {/* 摄入 vs 消耗 柱状图 */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="font-semibold text-gray-700 mb-4">摄入 vs 消耗</h3>
+        <h3 className="font-semibold text-gray-700 mb-4">近7天 摄入 vs 消耗</h3>
         <div className="h-48">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={weeklyData}>
@@ -98,7 +186,9 @@ export default function Report() {
           ✨ AI 健康建议
         </h3>
         <p className="text-sm text-indigo-800 leading-relaxed">
-          本周运动表现优秀，尤其是周四的HIIT训练消耗了大量热量！不过周三碳水摄入偏高（主要是晚餐），建议下周尝试将晚餐主食减半，增加绿叶蔬菜的摄入。
+          {averages.intake > averages.burn + 500 
+            ? '本周热量摄入略高于消耗，建议适当增加有氧运动时长，或者晚餐减少碳水摄入哦。'
+            : '本周热量控制得非常棒！继续保持这种平衡，注意多补充水分和优质蛋白。'}
         </p>
       </div>
     </div>

@@ -1,7 +1,46 @@
 import { Link } from 'react-router-dom';
 import { Scale, Utensils, Dumbbell, ArrowRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 export default function Home() {
+  const [summary, setSummary] = useState({ intake: 0, burned: 0 });
+
+  useEffect(() => {
+    async function fetchSummary() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        // 获取今日摄入
+        const { data: dietData } = await supabase
+          .from('diet_logs')
+          .select('calories')
+          .eq('user_id', user.id)
+          .gte('recorded_at', todayStart.toISOString());
+
+        // 获取今日消耗
+        const { data: fitnessData } = await supabase
+          .from('fitness_logs')
+          .select('calories_burned')
+          .eq('user_id', user.id)
+          .gte('recorded_at', todayStart.toISOString());
+
+        const totalIntake = dietData?.reduce((sum, item) => sum + (item.calories || 0), 0) || 0;
+        const totalBurned = fitnessData?.reduce((sum, item) => sum + (item.calories_burned || 0), 0) || 0;
+
+        setSummary({ intake: totalIntake, burned: totalBurned });
+      } catch (error) {
+        console.error('Error fetching summary:', error);
+      }
+    }
+
+    fetchSummary();
+  }, []);
+
   return (
     <div className="p-6 max-w-md mx-auto space-y-8">
       <header className="pt-8 pb-4">
@@ -9,17 +48,17 @@ export default function Home() {
         <p className="text-gray-500 mt-1">极简主义 AI 饮食与体重管理</p>
       </header>
 
-      {/* 今日概览卡片 (Mock Data) */}
+      {/* 今日概览卡片 */}
       <div className="bg-gradient-to-br from-primary/20 to-secondary/20 p-6 rounded-2xl shadow-sm border border-primary/10">
         <h2 className="text-lg font-semibold text-gray-700 mb-4">今日概览</h2>
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white/80 p-4 rounded-xl">
             <div className="text-xs text-gray-500 mb-1">摄入</div>
-            <div className="text-2xl font-bold text-gray-800">1,240 <span className="text-xs font-normal text-gray-500">kcal</span></div>
+            <div className="text-2xl font-bold text-gray-800">{summary.intake} <span className="text-xs font-normal text-gray-500">kcal</span></div>
           </div>
           <div className="bg-white/80 p-4 rounded-xl">
             <div className="text-xs text-gray-500 mb-1">消耗</div>
-            <div className="text-2xl font-bold text-gray-800">320 <span className="text-xs font-normal text-gray-500">kcal</span></div>
+            <div className="text-2xl font-bold text-gray-800">{summary.burned} <span className="text-xs font-normal text-gray-500">kcal</span></div>
           </div>
         </div>
       </div>

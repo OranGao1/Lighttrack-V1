@@ -1,33 +1,114 @@
-import { useState } from 'react';
-import { Play, Pause, Square, Plus, Trash2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Pause, Square, Plus, Trash2, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
-const mockExercises = [
-  { id: 1, type: '跑步', duration: 30, calories: 300, date: 'Today' },
-  { id: 2, type: '力量训练', duration: 45, calories: 220, date: 'Today' },
-];
+type FitnessLog = {
+  id: string;
+  activity_type: string;
+  duration_minutes: number;
+  calories_burned: number;
+  recorded_at: string;
+};
 
 export default function Fitness() {
-  const [exercises, setExercises] = useState(mockExercises);
+  const [exercises, setExercises] = useState<FitnessLog[]>([]);
   const [newExercise, setNewExercise] = useState({ type: '跑步', duration: '', calories: '' });
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timer, setTimer] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const handleAddExercise = () => {
+  // 计时器逻辑
+  useEffect(() => {
+    let interval: any;
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setTimer((prev) => prev + 1);
+      }, 1000);
+    } else if (!isTimerRunning && timer !== 0) {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
+
+  // 获取今日运动记录
+  const fetchFitnessLogs = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .from('fitness_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('recorded_at', todayStart.toISOString())
+        .order('recorded_at', { ascending: false });
+
+      if (error) throw error;
+      if (data) setExercises(data);
+    } catch (error) {
+      console.error('Error fetching fitness logs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFitnessLogs();
+  }, []);
+
+  const handleAddExercise = async () => {
     if (!newExercise.duration || !newExercise.calories) return;
     
-    setExercises([...exercises, {
-      id: Date.now(),
-      type: newExercise.type,
-      duration: parseInt(newExercise.duration),
-      calories: parseInt(newExercise.calories),
-      date: 'Today'
-    }]);
-    setNewExercise({ type: '跑步', duration: '', calories: '' });
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user logged in');
+
+      const { error } = await supabase.from('fitness_logs').insert([
+        {
+          user_id: user.id,
+          activity_type: newExercise.type,
+          duration_minutes: parseInt(newExercise.duration),
+          calories_burned: parseInt(newExercise.calories)
+        }
+      ]);
+
+      if (error) throw error;
+
+      setNewExercise({ type: '跑步', duration: '', calories: '' });
+      fetchFitnessLogs();
+    } catch (error) {
+      console.error('Error adding fitness log:', error);
+      alert('添加失败');
+    }
   };
 
-  const handleDelete = (id: number) => {
-    setExercises(exercises.filter(e => e.id !== id));
+  const handleStopTimer = () => {
+    setIsTimerRunning(false);
+    // 自动填入时长（分钟）
+    const minutes = Math.ceil(timer / 60);
+    setNewExercise(prev => ({ ...prev, duration: minutes.toString() }));
+    // 简单估算热量 (假设跑步 10kcal/min)
+    if (newExercise.type === '跑步') {
+      setNewExercise(prev => ({ ...prev, calories: (minutes * 10).toString() }));
+    }
+    setTimer(0);
   };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定删除？')) return;
+    try {
+      const { error } = await supabase.from('fitness_logs').delete().eq('id', id);
+      if (error) throw error;
+      fetchFitnessLogs();
+    } catch (error) {
+      console.error('Error deleting fitness log:', error);
+    }
+  };
+
+  if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
 
   return (
     <div className="p-6 max-w-md mx-auto space-y-6">
@@ -47,7 +128,7 @@ export default function Fitness() {
             {isTimerRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
           </button>
           <button 
-            onClick={() => { setIsTimerRunning(false); setTimer(0); }}
+            onClick={handleStopTimer}
             className="bg-white/20 hover:bg-white/30 p-3 rounded-full backdrop-blur-sm transition-colors"
           >
             <Square className="w-6 h-6 fill-current" />
@@ -101,27 +182,31 @@ export default function Fitness() {
       {/* 今日记录列表 */}
       <div>
         <h3 className="font-semibold text-gray-700 mb-4">今日运动 ({exercises.length})</h3>
-        <div className="space-y-3">
-          {exercises.map((exercise) => (
-            <div key={exercise.id} className="bg-white p-4 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="bg-orange-100 p-2 rounded-lg text-orange-600">
-                  <Play className="w-4 h-4 fill-current" />
+        {exercises.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center">今天还没运动，动起来！</p>
+        ) : (
+          <div className="space-y-3">
+            {exercises.map((exercise) => (
+              <div key={exercise.id} className="bg-white p-4 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="bg-orange-100 p-2 rounded-lg text-orange-600">
+                    <Play className="w-4 h-4 fill-current" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-800">{exercise.activity_type}</div>
+                    <div className="text-xs text-gray-500">{exercise.duration_minutes} 分钟 • {exercise.calories_burned} kcal</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-medium text-gray-800">{exercise.type}</div>
-                  <div className="text-xs text-gray-500">{exercise.duration} 分钟 • {exercise.calories} kcal</div>
-                </div>
+                <button 
+                  onClick={() => handleDelete(exercise.id)}
+                  className="text-gray-400 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
-              <button 
-                onClick={() => handleDelete(exercise.id)}
-                className="text-gray-400 hover:text-red-500 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,35 +1,113 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Plus } from 'lucide-react';
+import { Plus, Loader2, Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { format } from 'date-fns';
 
-const mockData = [
-  { day: 'Mon', weight: 70.5 },
-  { day: 'Tue', weight: 70.2 },
-  { day: 'Wed', weight: 69.8 },
-  { day: 'Thu', weight: 69.9 },
-  { day: 'Fri', weight: 69.5 },
-  { day: 'Sat', weight: 69.4 },
-  { day: 'Sun', weight: 69.2 },
-];
+type WeightLog = {
+  id: string;
+  weight: number;
+  recorded_at: string;
+};
 
 export default function Weight() {
-  const [currentWeight, setCurrentWeight] = useState(69.2);
+  const [currentWeight, setCurrentWeight] = useState<number | null>(null);
   const [inputWeight, setInputWeight] = useState('');
-  const [history, setHistory] = useState(mockData);
+  const [history, setHistory] = useState<WeightLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleAddWeight = () => {
+  // 获取体重记录
+  const fetchWeights = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('weight_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('recorded_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        setHistory(data);
+        if (data.length > 0) {
+          setCurrentWeight(data[data.length - 1].weight);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching weight logs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWeights();
+  }, []);
+
+  // 添加体重记录
+  const handleAddWeight = async () => {
     if (!inputWeight) return;
     const newWeight = parseFloat(inputWeight);
     if (isNaN(newWeight)) return;
     
-    setCurrentWeight(newWeight);
-    setHistory([...history, { day: 'Today', weight: newWeight }]);
-    setInputWeight('');
+    setSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user logged in');
+
+      const { error } = await supabase
+        .from('weight_logs')
+        .insert([
+          { user_id: user.id, weight: newWeight }
+        ]);
+
+      if (error) throw error;
+
+      setInputWeight('');
+      fetchWeights(); // 重新加载数据
+    } catch (error) {
+      console.error('Error adding weight:', error);
+      alert('添加失败，请重试');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const startWeight = 72.0;
-  const goalWeight = 65.0;
-  const progress = ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100;
+  // 删除记录
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定要删除这条记录吗？')) return;
+    try {
+      const { error } = await supabase
+        .from('weight_logs')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      fetchWeights();
+    } catch (error) {
+      console.error('Error deleting weight:', error);
+    }
+  };
+
+  const startWeight = history.length > 0 ? history[0].weight : (currentWeight || 70);
+  const goalWeight = 65.0; // 这里暂时写死，后续可以做到个人资料里
+  const progress = currentWeight 
+    ? ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100 
+    : 0;
+
+  // 格式化图表数据
+  const chartData = history.map(log => ({
+    day: format(new Date(log.recorded_at), 'MM/dd'),
+    weight: log.weight
+  }));
+
+  if (loading) {
+    return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="p-6 max-w-md mx-auto space-y-6">
@@ -39,7 +117,7 @@ export default function Weight() {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
         <p className="text-gray-500 text-sm mb-2">当前体重</p>
         <div className="text-4xl font-bold text-primary mb-2">
-          {currentWeight} <span className="text-lg text-gray-400 font-normal">kg</span>
+          {currentWeight || '--'} <span className="text-lg text-gray-400 font-normal">kg</span>
         </div>
         <div className="flex justify-center items-center gap-4 text-xs text-gray-500">
            <span>初始: {startWeight}kg</span>
@@ -51,30 +129,38 @@ export default function Weight() {
             style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
           />
         </div>
-        <p className="text-xs text-gray-400 mt-2">距离目标还差 {(currentWeight - goalWeight).toFixed(1)} kg</p>
+        <p className="text-xs text-gray-400 mt-2">
+          {currentWeight ? `距离目标还差 ${(currentWeight - goalWeight).toFixed(1)} kg` : '开始记录你的第一条体重吧'}
+        </p>
       </div>
 
       {/* 趋势图 */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 h-64">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4">近7天趋势</h3>
-        <ResponsiveContainer width="100%" height="85%">
-          <LineChart data={history}>
-            <XAxis dataKey="day" stroke="#9CA3AF" fontSize={12} tickLine={false} axisLine={false} />
-            <YAxis domain={['dataMin - 1', 'dataMax + 1']} hide />
-            <Tooltip 
-              contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-              itemStyle={{ color: '#10B981' }}
-            />
-            <Line 
-              type="monotone" 
-              dataKey="weight" 
-              stroke="#10B981" 
-              strokeWidth={3} 
-              dot={{ r: 4, fill: '#10B981', strokeWidth: 2, stroke: '#fff' }}
-              activeDot={{ r: 6 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">体重趋势</h3>
+        {history.length > 0 ? (
+          <ResponsiveContainer width="100%" height="85%">
+            <LineChart data={chartData}>
+              <XAxis dataKey="day" stroke="#9CA3AF" fontSize={12} tickLine={false} axisLine={false} />
+              <YAxis domain={['dataMin - 1', 'dataMax + 1']} hide />
+              <Tooltip 
+                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                itemStyle={{ color: '#10B981' }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="weight" 
+                stroke="#10B981" 
+                strokeWidth={3} 
+                dot={{ r: 4, fill: '#10B981', strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+            暂无数据
+          </div>
+        )}
       </div>
 
       {/* 记录输入 */}
@@ -88,10 +174,27 @@ export default function Weight() {
         />
         <button 
           onClick={handleAddWeight}
+          disabled={submitting}
           className="bg-primary text-white p-3 rounded-xl hover:bg-primary/90 transition-colors flex items-center justify-center min-w-[3rem]"
         >
-          <Plus className="w-6 h-6" />
+          {submitting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Plus className="w-6 h-6" />}
         </button>
+      </div>
+
+      {/* 历史记录列表 */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-gray-700">历史记录</h3>
+        {history.slice().reverse().map((log) => (
+          <div key={log.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-50">
+            <span className="text-gray-600">{format(new Date(log.recorded_at), 'yyyy-MM-dd HH:mm')}</span>
+            <div className="flex items-center gap-4">
+              <span className="font-bold text-gray-800">{log.weight} kg</span>
+              <button onClick={() => handleDelete(log.id)} className="text-gray-300 hover:text-red-500">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
