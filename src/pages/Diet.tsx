@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Camera, Check, X, Loader2, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { format } from 'date-fns';
 
 type DietLog = {
   id: string;
