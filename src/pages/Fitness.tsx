@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Square, Plus, Trash2, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -16,18 +16,25 @@ export default function Fitness() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(true);
+  const intervalRef = useRef<any>(null);
 
   // 计时器逻辑
   useEffect(() => {
-    let interval: any;
     if (isTimerRunning) {
-      interval = setInterval(() => {
+      intervalRef.current = setInterval(() => {
         setTimer((prev) => prev + 1);
       }, 1000);
-    } else if (!isTimerRunning && timer !== 0) {
-      clearInterval(interval);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, [isTimerRunning]);
 
   // 获取今日运动记录
@@ -85,6 +92,10 @@ export default function Fitness() {
     }
   };
 
+  const handleToggleTimer = () => {
+    setIsTimerRunning(prev => !prev);
+  };
+
   const handleStopTimer = () => {
     setIsTimerRunning(false);
     // 自动填入时长（分钟）
@@ -124,7 +135,7 @@ export default function Fitness() {
         </div>
         <div className="flex gap-4">
           <button 
-            onClick={() => setIsTimerRunning(!isTimerRunning)}
+            onClick={handleToggleTimer}
             className="bg-white/20 hover:bg-white/30 p-3 rounded-full backdrop-blur-sm transition-colors"
           >
             {isTimerRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
